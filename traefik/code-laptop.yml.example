@@ -1,0 +1,30 @@
+# Hetzner-edge Traefik file router for the laptop's Codeman.
+#
+# The laptop sits behind no Traefik of its own — Hetzner edge reaches it
+# directly over Tailscale (hetzner-edge runs tailscaled per the Public DNS
+# map → Raw TCP routes table). When the laptop is offline this returns 502;
+# that's expected.
+#
+# Drop into /opt/data/traefik/dynamic/ on hetzner-edge (the dir is bind-
+# mounted into the Traefik container, NOT auto-synced from git per the
+# Authentik atlas operator-only.yml convention). Replace <laptop-tailscale-ip>.
+#
+# Desktop Codeman does NOT need a file router here — it's picked up by the
+# Docker labels in docker/compose.yml via the existing zkm-catch wildcard.
+
+http:
+  routers:
+    code-laptop:
+      rule: "Host(`code-laptop.scharc.de`)"
+      entryPoints: [websecure]
+      service: code-laptop
+      middlewares: [protected@file]
+      priority: 50
+      tls: {}
+
+  services:
+    code-laptop:
+      loadBalancer:
+        servers:
+          - url: "http://<laptop-tailscale-ip>:3030"
+        passHostHeader: true

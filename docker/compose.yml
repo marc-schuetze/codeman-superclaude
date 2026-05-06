@@ -1,0 +1,53 @@
+# codeman-superclaude — desktop deployment.
+# Image is built by Forgejo Actions (.forgejo/workflows/build.yml) and
+# published to git.schuetze.io/marc/codeman-superclaude.
+#
+# This compose lives at /opt/docker/codeman/compose.yml on zkm-infra.
+# The desktop Traefik (Docker labels provider) picks it up via scharc-ingress;
+# the zkm-catch wildcard at hetzner-edge handles public TLS + protected@file.
+
+services:
+  codeman:
+    image: git.schuetze.io/marc/codeman-superclaude:${IMAGE_TAG:-latest}
+    container_name: codeman
+    restart: unless-stopped
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+
+    # The container runs as the host user so the bind-mounted tmux socket
+    # has matching ownership; ${HOME_DIR} is the host's home so paths inside
+    # the container resolve identically to outside (codeman writes hooks
+    # into ~/.claude/projects/<case>/.claude/, etc.).
+    environment:
+      HOME: ${HOME_DIR:-/home/scharc}
+      CODEMAN_PASSWORD: ${CODEMAN_PASSWORD:-}
+      # Codeman uses --port 3030 from CMD; override via:
+      # command: ["node", "dist/index.js", "web", "--port", "${CODEMAN_PORT}"]
+
+    volumes:
+      # tmux socket: the container's tmux client speaks to the host's tmux
+      # server. Path inside container must match $TMUX_TMPDIR/$UID layout.
+      - /tmp/tmux-${HOST_UID:-1000}:/tmp/tmux-${HOST_UID:-1000}
+
+      # Codeman state (mux-sessions.json, state.json)
+      - ${HOME_DIR:-/home/scharc}/.codeman:${HOME_DIR:-/home/scharc}/.codeman
+
+      # Subagent watcher + hook configs read/write here
+      - ${HOME_DIR:-/home/scharc}/.claude:${HOME_DIR:-/home/scharc}/.claude
+
+      # Project trees — mount the same path inside the container so working
+      # directories resolve identically (sessions chdir to /x/coding/foo).
+      - /x:/x
+
+    networks:
+      - scharc-ingress
+
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=scharc-ingress
+      - traefik.http.routers.codeman.rule=Host(`${CODEMAN_HOST:-code.scharc.de}`)
+      - traefik.http.routers.codeman.entrypoints=web
+      - traefik.http.services.codeman.loadbalancer.server.port=3030
+
+networks:
+  scharc-ingress:
+    external: true
