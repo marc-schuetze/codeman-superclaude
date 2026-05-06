@@ -1,7 +1,7 @@
 From 6971d3987c26466ee2de79eb7f4662c24463a020 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Wed, 6 May 2026 21:04:23 +0200
-Subject: [PATCH] feat: discover externally-managed sc|<path> tmux sessions
+Subject: [PATCH 1/2] feat: discover externally-managed sc|<path> tmux sessions
 
 Adds a third allowed mux-name pattern for sessions named `sc|<absolute-path>[-N]`
 (produced by scharc/superclaude). Discovery and isValidMuxName accept them;

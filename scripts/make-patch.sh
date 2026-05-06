@@ -19,11 +19,21 @@ git format-patch master..superclaude-compat \
     --output-directory "$ADDON_DIR/patches/" \
     --suffix=.patch
 
-# Force a stable filename for the single-patch case.
+# Stable filenames per slot, in order. Add a slot here when adding a new
+# commit to the superclaude-compat branch.
+declare -a SLOT_NAMES=(
+    "0001-discover-superclaude-sessions.patch"
+    "0002-create-with-superclaude-naming.patch"
+)
+
 shopt -s nullglob
-patches=("$ADDON_DIR/patches/"*.patch)
-if (( ${#patches[@]} == 1 )); then
-    mv "${patches[0]}" "$ADDON_DIR/patches/0001-discover-superclaude-sessions.patch"
+generated=("$ADDON_DIR/patches/"*.patch)
+if (( ${#generated[@]} != ${#SLOT_NAMES[@]} )); then
+    echo "warn: ${#generated[@]} generated patches but ${#SLOT_NAMES[@]} stable slots — keeping generated names"
+else
+    for i in "${!generated[@]}"; do
+        mv "${generated[$i]}" "$ADDON_DIR/patches/${SLOT_NAMES[$i]}"
+    done
 fi
 
 # Refresh the pinned upstream commit hash.

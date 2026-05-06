@@ -1,0 +1,87 @@
+From 1a4bd7956a248e72158c4a7517a53d9c8c57f523 Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Wed, 6 May 2026 21:24:54 +0200
+Subject: [PATCH 2/2] feat: create new sessions with sc|<path> naming when path
+ fits
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Mirrors scharc/superclaude's slug() — sticky-per-cwd `sc|<abs-path>` with
+`-N` parallel suffix on collision. Codeman now generates session names
+that match the convention used by the terminal-side `superclaude new`
+command, so all sessions share one namespace and the `sc` fzf picker.
+
+Falls back to the legacy `codeman-<id>` form when the working dir contains
+characters outside the slug regex (spaces, exotic chars).
+
+Collision check uses `tmux has-session` directly so it sees both Codeman-
+tracked sessions and any user-created `sc|*` from the terminal.
+---
+ src/tmux-manager.ts | 36 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
+index 689986a..ee9c940 100644
+--- a/src/tmux-manager.ts
++++ b/src/tmux-manager.ts
+@@ -98,6 +98,15 @@ const LEGACY_MUX_NAME_PATTERN = /^claudeman-[a-f0-9-]+$/;
+ /** External superclaude sessions: `sc|<absolute-path>` with optional `-N` parallel suffix */
+ const SUPERCLAUDE_MUX_NAME_PATTERN = /^sc\|\/[A-Za-z0-9._\-/~]+(?:-\d+)?$/;
+ 
++/**
++ * Whether a working dir is shaped to fit the `sc|<abs-path>` slug — i.e. composed
++ * only of characters allowed by `SUPERCLAUDE_MUX_NAME_PATTERN`. Paths with spaces
++ * or other exotic characters fall back to the legacy `codeman-<id>` naming.
++ */
++function pathFitsSuperclaudeSlug(workingDir: string): boolean {
++  return /^\/[A-Za-z0-9._\-/~]+$/.test(workingDir);
++}
++
+ /** Regex to validate tmux pane targets (e.g., "%0", "%1", "0", "1") */
+ const SAFE_PANE_TARGET_PATTERN = /^(%\d+|\d+)$/;
+ 
+@@ -506,7 +515,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+       resumeSessionId,
+       envOverrides,
+     } = options;
+-    const muxName = `codeman-${sessionId.slice(0, 8)}`;
++    const muxName = this.buildMuxName(workingDir, sessionId);
+ 
+     if (!isValidMuxName(muxName)) {
+       throw new Error('Invalid session name: contains unsafe characters');
+@@ -785,6 +794,31 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+     }
+   }
+ 
++  /**
++   * Pick a tmux session name for a new session.
++   *
++   * Mirrors scharc/superclaude's `slug()`: sticky-per-cwd `sc|<abs-path>` with
++   * `-N` parallel suffix on collision (queried directly via `tmux has-session`,
++   * so it sees both Codeman-managed sessions AND any user-created `sc|*` from
++   * the terminal). Falls back to the legacy `codeman-<id>` form for working
++   * directories whose path can't fit the slug pattern.
++   *
++   * Effect: terminal-created and web-created sessions share one namespace and
++   * both show up in the user's `sc` picker.
++   */
++  private buildMuxName(workingDir: string, sessionId: string): string {
++    if (!pathFitsSuperclaudeSlug(workingDir)) {
++      return `codeman-${sessionId.slice(0, 8)}`;
++    }
++    const base = `sc|${workingDir}`;
++    if (!this.sessionExists(base)) return base;
++    for (let i = 2; i < 100; i++) {
++      const candidate = `${base}-${i}`;
++      if (!this.sessionExists(candidate)) return candidate;
++    }
++    return `codeman-${sessionId.slice(0, 8)}`;
++  }
++
+   private sessionExists(muxName: string): boolean {
+     if (IS_TEST_MODE) return false;
+ 
+-- 
+2.43.0
+
