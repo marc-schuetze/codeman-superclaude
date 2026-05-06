@@ -14,7 +14,7 @@ cd "$CODEMAN_DIR"
 echo "==> fetching upstream"
 git fetch origin master
 
-current=$(git rev-parse origin/master | head -c 12)
+current=$(git rev-parse origin/master)
 pinned=$(cat "$ADDON_DIR/CODEMAN_COMMIT" | tr -d '[:space:]')
 if [[ "$current" == "$pinned" ]]; then
     echo "already at upstream $current — nothing to do"

@@ -27,8 +27,7 @@ if (( ${#patches[@]} == 1 )); then
 fi
 
 # Refresh the pinned upstream commit hash.
-git rev-parse master | head -c 12 > "$ADDON_DIR/CODEMAN_COMMIT"
-echo >> "$ADDON_DIR/CODEMAN_COMMIT"
+git rev-parse master > "$ADDON_DIR/CODEMAN_COMMIT"
 
 echo "patches refreshed:"
 ls -1 "$ADDON_DIR/patches/"
