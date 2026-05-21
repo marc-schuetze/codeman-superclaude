@@ -1,7 +1,7 @@
-From 1a4bd7956a248e72158c4a7517a53d9c8c57f523 Mon Sep 17 00:00:00 2001
+From b0e076a248044f50eaa25c1aa530aece7d6faabb Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Wed, 6 May 2026 21:24:54 +0200
-Subject: [PATCH 2/2] feat: create new sessions with sc|<path> naming when path
+Subject: [PATCH 2/4] feat: create new sessions with sc|<path> naming when path
  fits
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -17,12 +17,9 @@ characters outside the slug regex (spaces, exotic chars).
 
 Collision check uses `tmux has-session` directly so it sees both Codeman-
 tracked sessions and any user-created `sc|*` from the terminal.
----
- src/tmux-manager.ts | 36 +++++++++++++++++++++++++++++++++++-
- 1 file changed, 35 insertions(+), 1 deletion(-)
 
 diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
-index 689986a..ee9c940 100644
+index f85cbd7..263e0a8 100644
 --- a/src/tmux-manager.ts
 +++ b/src/tmux-manager.ts
 @@ -98,6 +98,15 @@ const LEGACY_MUX_NAME_PATTERN = /^claudeman-[a-f0-9-]+$/;
@@ -50,7 +47,7 @@ index 689986a..ee9c940 100644
  
      if (!isValidMuxName(muxName)) {
        throw new Error('Invalid session name: contains unsafe characters');
-@@ -785,6 +794,31 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+@@ -792,6 +801,31 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
      }
    }
  

@@ -1,0 +1,60 @@
+From 66884c6ec2fd55d389372ed4b4a55ac5664c7a09 Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Thu, 21 May 2026 06:59:16 +0200
+Subject: [PATCH 4/4] fix: skip tmux mouse-mode toggle on discovered sessions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+startMouseModeSync overrides the user's global tmux mouse setting on every
+tracked session (off by default, on if >1 pane). For externally-managed
+sc|<path> sessions picked up by reconcileSessions(), this clobbers config
+intended for the terminal-attached consumer — wheel events stop scrolling
+the tmux buffer because mouse mode is forced off.
+
+Mark sessions discovered via reconcile with a new MuxSession.discovered
+flag and skip them in the mouse-mode sync loop. Sessions codeman creates
+itself (including sc|<path>-named ones from the createSession path) are
+untouched and keep the existing dynamic toggle.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+diff --git a/src/mux-interface.ts b/src/mux-interface.ts
+index 15d6822..9312fe2 100644
+--- a/src/mux-interface.ts
++++ b/src/mux-interface.ts
+@@ -40,6 +40,8 @@ export interface MuxSession {
+   respawnConfig?: PersistedRespawnConfig;
+   /** Whether Ralph / Todo tracking is enabled */
+   ralphEnabled?: boolean;
++  /** True if this session was found via reconcile, not created by codeman. Skip tmux option mutations (mouse mode, etc.) on these — they may be terminal-attached and have their own config. */
++  discovered?: boolean;
+ }
+ 
+ /**
+diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
+index 263e0a8..728ce16 100644
+--- a/src/tmux-manager.ts
++++ b/src/tmux-manager.ts
+@@ -1098,6 +1098,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+         mode: 'claude',
+         attached: false,
+         name: displayName,
++        discovered: true,
+       };
+       this.sessions.set(sessionId, session);
+       discovered.push(sessionId);
+@@ -1295,6 +1296,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+       if (IS_TEST_MODE) return;
+ 
+       for (const session of this.sessions.values()) {
++        // Externally-managed sessions (discovered by reconcile) may have a terminal-attached
++        // consumer with its own mouse config — don't override.
++        if (session.discovered) continue;
++
+         const panes = this.listPanes(session.muxName);
+         const count = panes.length;
+         if (count === 0) continue;
+-- 
+2.43.0
+

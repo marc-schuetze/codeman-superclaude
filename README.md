@@ -1,26 +1,36 @@
 # codeman-superclaude
 
 [Codeman][codeman] (mobile-first web UI for Claude Code) packaged with a small
-patch that teaches it to discover the `sc|<path>` tmux sessions produced by
-[scharc/superclaude][superclaude].
+patch series that teaches it to discover the `sc|<path>` tmux sessions
+produced by [scharc/superclaude][superclaude] and to treat them as
+externally-managed.
 
 The two upstream projects are independent; this repo is only the *integration
-glue*: a 50-LOC patch that extends Codeman's session-discovery, a Dockerfile
-that builds it from a pinned commit, a compose file with the right host
-mounts to drive the host's tmux server, and a Forgejo Actions workflow that
-publishes the image.
+glue*: 4 patches that extend Codeman's session-discovery, a Dockerfile that
+builds it from a pinned commit, a compose file with the right host mounts to
+drive the host's tmux server, and a Forgejo Actions workflow that publishes
+the image.
 
 ## What it does
 
 - Codeman's `tmux-manager.ts` ships with `codeman-*` and `claudeman-*` as the
-  only allowed session-name prefixes. The patch adds a third pattern,
+  only allowed session-name prefixes. Patch 0001 adds a third pattern,
   `^sc\|/<abs-path>(?:-\d+)?$`, so superclaude's sticky-per-cwd sessions
-  show up in the web UI.
-- `parsePaneList` is switched from `indexOf('|')` to a regex anchored on the
-  rightmost `|<digits>` block, so session names that themselves contain `|`
-  parse correctly.
-- The upstream installer's `alias sc='tmux-chooser'` line is skipped to avoid
-  clobbering the `sc` binary that comes with superclaude.
+  show up in the web UI. `parsePaneList` is switched from `indexOf('|')` to a
+  regex anchored on the rightmost `|<digits>` block, so session names that
+  themselves contain `|` parse correctly. The upstream installer's
+  `alias sc='tmux-chooser'` line is skipped to avoid clobbering the `sc`
+  binary that comes with superclaude.
+- Patch 0002 makes Codeman *create* new sessions using the same
+  `sc|<abs-path>[-N]` naming when the working dir fits the slug, so the
+  picker, web UI, and terminal all share one namespace.
+- Patch 0003 fixes the reconcile endpoint so discovered sessions get wrapped
+  in server-side `Session` objects (otherwise the monitor panel renders them
+  as `UNKNOWN`).
+- Patch 0004 marks discovered sessions with a `discovered: true` flag and
+  skips them in the periodic mouse-mode sync — externally-managed sessions
+  may be terminal-attached and their `tmux set mouse on` should not be
+  silently flipped off by Codeman's xterm.js-selection optimisation.
 
 Everything else (web UI, respawn controller, subagent watcher, zerolag input
 overlay, QR auth) is unmodified upstream.
@@ -31,7 +41,10 @@ overlay, QR auth) is unmodified upstream.
 .
 ├── CODEMAN_COMMIT                         pinned upstream short SHA
 ├── patches/
-│   └── 0001-discover-superclaude-sessions.patch
+│   ├── 0001-discover-superclaude-sessions.patch
+│   ├── 0002-create-with-superclaude-naming.patch
+│   ├── 0003-wrap-discovered-as-sessions.patch
+│   └── 0004-skip-mouse-toggle-on-discovered.patch
 ├── docker/
 │   ├── Dockerfile                         multi-stage; clones + patches + builds
 │   ├── compose.yml                        deployment compose (zkm-infra desktop)
@@ -93,11 +106,11 @@ upstream's latest changes — or it's time to push the patch upstream as a
 
 ## Why an addon repo and not a fork
 
-The patch is tiny and isolated (one regex addition, one prefix check, one
-parser swap). Carrying a long-lived fork costs more than re-applying ~50 lines
-on each upstream bump. When upstream merges a configurable discovery hook,
-this repo collapses to just the Docker + Traefik glue — `patches/` becomes
-empty.
+The patch series is small and isolated. Carrying a long-lived fork costs more
+than re-applying a few hundred lines on each upstream bump. When upstream
+merges a configurable discovery hook (and accepts the discovered-session
+flag for non-clobbering tmux config), this repo collapses to just the
+Docker + Traefik glue — `patches/` becomes empty.
 
 [codeman]: https://github.com/Ark0N/Codeman
 [superclaude]: https://github.com/scharc/superclaude
