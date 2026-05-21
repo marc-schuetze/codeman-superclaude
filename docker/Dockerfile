@@ -13,7 +13,9 @@ ARG CODEMAN_COMMIT=e8a809ea80371e8bde4536cca3195f201f45b9fc
 FROM node:${NODE_VERSION} AS builder
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends \
+        git ca-certificates \
+        python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 
 ARG CODEMAN_REPO
