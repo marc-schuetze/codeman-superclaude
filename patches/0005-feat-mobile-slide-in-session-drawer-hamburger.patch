@@ -1,7 +1,7 @@
 From 1d18b435eb76645c911269e580e113ecc60790ff Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 20:18:34 +0200
-Subject: [PATCH 05/11] feat(mobile): slide-in session drawer (hamburger)
+Subject: [PATCH 05/12] feat(mobile): slide-in session drawer (hamburger)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

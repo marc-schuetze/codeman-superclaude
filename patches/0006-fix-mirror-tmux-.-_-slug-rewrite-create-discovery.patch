@@ -1,7 +1,7 @@
 From 5dd2c8268006e6a61984532640fbc156e6324f48 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 20:31:50 +0200
-Subject: [PATCH 06/11] fix: mirror tmux '.'/':'->'_' slug rewrite (create +
+Subject: [PATCH 06/12] fix: mirror tmux '.'/':'->'_' slug rewrite (create +
  discovery)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

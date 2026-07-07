@@ -1,0 +1,194 @@
+From 9914e20756b24b7a1e6547cc45069a77cf9ee6ef Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 23:25:09 +0200
+Subject: [PATCH 12/12] fix: window-size largest on the shared socket (don't
+ squish terminals)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Codeman set `window-size manual` on every session it started and resize-
+windowed it to the browser's dimensions, holding a persistent attach.
+On the shared `-L codeman` socket that pinned the tmux window to the phone
+browser's size and squished the user's own terminal (`sc`) — even when
+Codeman wasn't in use.
+
+Set `window-size largest` instead: tmux sizes each window to the LARGEST
+attached client, so the desktop terminal always wins and a phone glancing
+at the same session just gets a wider, scrollable view. Neuter resizeWindow
+to a no-op — `tmux resize-window -x -y` implicitly flips window-size back to
+`manual`, which would re-pin/squish. The browser PTY is still sized by the
+caller (Session.resize → ptyProcess.resize); tmux does window arbitration.
+---
+ src/mux-interface.ts      |  8 +++++---
+ src/session.ts            |  9 +++++----
+ src/tmux-manager.ts       | 42 ++++++++++++++++++++++-----------------
+ test/tmux-manager.test.ts | 22 ++++++++++----------
+ 4 files changed, 46 insertions(+), 35 deletions(-)
+
+diff --git a/src/mux-interface.ts b/src/mux-interface.ts
+index 069149c..c2af9f2 100644
+--- a/src/mux-interface.ts
++++ b/src/mux-interface.ts
+@@ -207,10 +207,12 @@ export interface TerminalMultiplexer extends EventEmitter {
+    */
+   getAttachArgs(muxName: string): string[];
+ 
+-  /** Pin a mux window so client attaches do not automatically dictate its size. */
+-  setManualWindowSize?(muxName: string): boolean;
++  /** Size a mux window to the LARGEST attached client, so an external terminal
++   *  sharing this socket is never squished to a browser's dimensions. */
++  setWindowSizeLargest?(muxName: string): boolean;
+ 
+-  /** Explicitly resize a mux window after Codeman accepts a terminal resize. */
++  /** No-op under window-size `largest` (kept for the Session.resize call path);
++   *  tmux does the window arbitration. The browser PTY is sized by the caller. */
+   resizeWindow?(muxName: string, cols: number, rows: number): boolean;
+ 
+   // ========== Availability ==========
+diff --git a/src/session.ts b/src/session.ts
+index daeb166..bafbe39 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -1158,10 +1158,11 @@ export class Session extends EventEmitter {
+       // No extra sleep — createSession() already waits for tmux readiness
+     }
+ 
+-    // Attach to the mux session via PTY
+-    // Prevent tmux from letting the newest browser attach dictate global window
+-    // size; accepted Codeman resize events update it explicitly below.
+-    mux.setManualWindowSize?.(this._muxSession!.muxName);
++    // Attach to the mux session via PTY.
++    // window-size `largest`: this tmux socket is shared with external terminal
++    // clients (superclaude `sc`), so let tmux size the window to the largest
++    // attached client rather than pinning it to the browser's dimensions.
++    mux.setWindowSizeLargest?.(this._muxSession!.muxName);
+     // Query existing tmux window size so re-attach matches (avoids flicker from 120x40 default).
+     // MUST go through the dedicated socket (mux.muxSocket); a bare `tmux display` hits the
+     // default server, always fails for our socketed sessions, and silently falls back to 120x40.
+diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
+index 6a181e7..f47604c 100644
+--- a/src/tmux-manager.ts
++++ b/src/tmux-manager.ts
+@@ -1182,7 +1182,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+         stdio: 'ignore',
+         env: cleanEnv,
+       });
+-      this.resizeWindow(muxName, 120, 40);
++      // No initial resize-window: window-size is set to `largest` on attach
++      // (setWindowSizeLargest); tmux sizes the shared window to the largest
++      // attached client. A manual resize-window here would flip it back to
++      // `manual` and pin/squish an external terminal sharing this socket.
+ 
+       // Set remain-on-exit now that the server is running — must be before respawn-pane
+       try {
+@@ -2473,25 +2476,41 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+     return ['-L', this.tmuxSocket, 'attach-session', '-t', muxName];
+   }
+ 
+-  setManualWindowSize(muxName: string): boolean {
++  setWindowSizeLargest(muxName: string): boolean {
+     if (!isValidMuxName(muxName)) {
+-      console.error('[TmuxManager] Invalid session name in setManualWindowSize:', muxName);
++      console.error('[TmuxManager] Invalid session name in setWindowSizeLargest:', muxName);
+       return false;
+     }
+ 
++    // `largest`, NOT `manual`: this socket is SHARED with external terminal
++    // clients (superclaude `sc`). `manual` + Codeman's browser-driven
++    // resize-window pinned the window to the phone's dimensions and squished
++    // the user's terminal even when Codeman wasn't in use. `largest` makes tmux
++    // size each window to the LARGEST attached client, so the desktop terminal
++    // always wins and a phone glancing at the same session just sees a wider,
++    // scrollable view. (Codeman's own browser-vs-browser size arbitration in
++    // Session.resize still runs; it just no longer dictates the tmux window.)
+     try {
+-      execSync(`${this.tmux()} set-window-option -t ${shellescape(muxName)} window-size manual`, {
++      execSync(`${this.tmux()} set-window-option -t ${shellescape(muxName)} window-size largest`, {
+         timeout: EXEC_TIMEOUT_MS,
+         stdio: 'ignore',
+       });
+       return true;
+     } catch (err) {
+-      console.error('[TmuxManager] Failed to set manual window size:', err);
++      console.error('[TmuxManager] Failed to set window size largest:', err);
+       return false;
+     }
+   }
+ 
+   resizeWindow(muxName: string, cols: number, rows: number): boolean {
++    // Intentional NO-OP on the tmux window. Under `window-size largest`
++    // (setWindowSizeLargest) tmux arbitrates the shared window to the largest
++    // attached client. `tmux resize-window -x -y` IMPLICITLY flips window-size
++    // back to `manual`, which would re-pin the window to the browser's size and
++    // squish an external terminal sharing this socket — so we must not call it.
++    // The browser's own PTY client is still sized by the caller
++    // (Session.resize → ptyProcess.resize); tmux does the window arbitration.
++    // Input validation is kept so callers get consistent checking.
+     if (!isValidMuxName(muxName)) {
+       console.error('[TmuxManager] Invalid session name in resizeWindow:', muxName);
+       return false;
+@@ -2500,19 +2519,6 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+       console.error('[TmuxManager] Invalid resize dimensions:', { cols, rows });
+       return false;
+     }
+-
+-    // Fire-and-forget: this runs on the interactive resize path (WS {t:'z'} and
+-    // HTTP /resize), so use a non-blocking exec — a slow/hung tmux must not stall
+-    // the Fastify event loop while other sessions' input/SSE are served. The sole
+-    // caller (Session.resize) ignores the result, and under `window-size manual`
+-    // the subsequent ptyProcess.resize is subordinate to this authoritative size.
+-    exec(
+-      `${this.tmux()} resize-window -t ${shellescape(muxName)} -x ${cols} -y ${rows}`,
+-      { timeout: EXEC_TIMEOUT_MS },
+-      (err) => {
+-        if (err) console.error('[TmuxManager] Failed to resize tmux window:', err);
+-      }
+-    );
+     return true;
+   }
+ 
+diff --git a/test/tmux-manager.test.ts b/test/tmux-manager.test.ts
+index 2fc27c3..5075a32 100644
+--- a/test/tmux-manager.test.ts
++++ b/test/tmux-manager.test.ts
+@@ -120,24 +120,26 @@ describe('TmuxManager (unit)', () => {
+   });
+ 
+   describe('window sizing', () => {
+-    it('pins a tmux window to manual sizing before browser attach', () => {
+-      expect(manager.setManualWindowSize('codeman-abc12345')).toBe(true);
++    it('sizes a tmux window to the largest attached client (shared-socket safe)', () => {
++      expect(manager.setWindowSizeLargest('codeman-abc12345')).toBe(true);
+ 
+       expect(mockedExecSync).toHaveBeenCalledWith(
+-        "tmux -L 'codeman' set-window-option -t 'codeman-abc12345' window-size manual",
++        "tmux -L 'codeman' set-window-option -t 'codeman-abc12345' window-size largest",
+         expect.objectContaining({ stdio: 'ignore' })
+       );
+     });
+ 
+-    it('resizes the tmux window when Codeman accepts a desktop resize', () => {
++    it('does NOT resize-window (no-op under window-size largest) but validates input', () => {
++      // resize-window implicitly reverts window-size to `manual`, re-pinning the
++      // shared window and squishing external terminals — so it must not run.
+       expect(manager.resizeWindow('codeman-abc12345', 140, 42)).toBe(true);
+-
+-      // Non-blocking exec (not execSync) on the interactive resize hot path.
+-      expect(mockedExec).toHaveBeenCalledWith(
+-        "tmux -L 'codeman' resize-window -t 'codeman-abc12345' -x 140 -y 42",
+-        expect.objectContaining({ timeout: expect.any(Number) }),
+-        expect.any(Function)
++      expect(mockedExec).not.toHaveBeenCalledWith(
++        expect.stringContaining('resize-window'),
++        expect.anything(),
++        expect.anything()
+       );
++      // still validates dimensions
++      expect(manager.resizeWindow('codeman-abc12345', -1, 42)).toBe(false);
+     });
+   });
+ 
+-- 
+2.43.0
+

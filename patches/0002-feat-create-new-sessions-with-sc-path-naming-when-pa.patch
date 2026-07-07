@@ -1,7 +1,7 @@
 From 0021681afb35ec097a6dad48d50f67724eadf821 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Wed, 6 May 2026 21:24:54 +0200
-Subject: [PATCH 02/11] feat: create new sessions with sc|<path> naming when
+Subject: [PATCH 02/12] feat: create new sessions with sc|<path> naming when
  path fits
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

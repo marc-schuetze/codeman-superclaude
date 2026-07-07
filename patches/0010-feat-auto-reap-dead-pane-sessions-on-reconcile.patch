@@ -1,7 +1,7 @@
 From e82e2c4c46553c94547e3e00d3473fc8d0d2e824 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 21:49:05 +0200
-Subject: [PATCH 10/11] feat: auto-reap dead-pane sessions on reconcile
+Subject: [PATCH 10/12] feat: auto-reap dead-pane sessions on reconcile
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

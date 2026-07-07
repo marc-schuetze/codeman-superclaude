@@ -1,7 +1,7 @@
 From deefe33b367f019889e91d7f91fa13701c678b5f Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Thu, 21 May 2026 06:59:16 +0200
-Subject: [PATCH 04/11] fix: skip tmux mouse-mode toggle on discovered sessions
+Subject: [PATCH 04/12] fix: skip tmux mouse-mode toggle on discovered sessions
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

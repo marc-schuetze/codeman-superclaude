@@ -1,7 +1,7 @@
 From 46390d4f02be51a89852b85778cfa759a491439a Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 22:20:50 +0200
-Subject: [PATCH 11/11] =?UTF-8?q?feat(ui):=20lean=20UI=20=E2=80=94=20hide?=
+Subject: [PATCH 11/12] =?UTF-8?q?feat(ui):=20lean=20UI=20=E2=80=94=20hide?=
  =?UTF-8?q?=20unused=20runtimes=20+=20tunnel?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
