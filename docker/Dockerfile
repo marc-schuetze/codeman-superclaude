@@ -7,7 +7,7 @@
 
 ARG NODE_VERSION=20-bookworm-slim
 ARG CODEMAN_REPO=https://github.com/Ark0N/Codeman.git
-ARG CODEMAN_COMMIT=e8a809ea80371e8bde4536cca3195f201f45b9fc
+ARG CODEMAN_COMMIT=1fa88cd1877f80536fca38bcf4ad1667ad286fff
 
 # ---- builder ----------------------------------------------------------------
 FROM node:${NODE_VERSION} AS builder

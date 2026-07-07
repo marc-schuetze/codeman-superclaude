@@ -1,8 +1,8 @@
-From faaa3e1c094a315dcbbdd1bdfaf0d73f6948ec1b Mon Sep 17 00:00:00 2001
+From 09fb671488b9a6f4ca4bb74d73427ff624cb77ad Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Thu, 21 May 2026 06:59:07 +0200
-Subject: [PATCH 3/4] fix: wrap discovered tmux sessions in Session objects on
- reconcile
+Subject: [PATCH 03/10] fix: wrap discovered tmux sessions in Session objects
+ on reconcile
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -22,6 +22,13 @@ client's this.sessions map gets the new entries without a refresh.
 Client: refresh on data.discovered > 0 too, not only data.dead.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+---
+ src/web/ports/infra-port.ts    | 1 +
+ src/web/public/panels-ui.js    | 9 +++++++--
+ src/web/routes/mux-routes.ts   | 2 +-
+ src/web/server.ts              | 9 +++++++--
+ test/routes/mux-routes.test.ts | 9 +++++----
+ 5 files changed, 21 insertions(+), 9 deletions(-)
 
 diff --git a/src/web/ports/infra-port.ts b/src/web/ports/infra-port.ts
 index 322cdf3..b6dcf9f 100644
@@ -34,17 +41,17 @@ index 322cdf3..b6dcf9f 100644
 +  reconcileMuxSessions(): Promise<{ alive: string[]; dead: string[]; discovered: string[] }>;
  }
 diff --git a/src/web/public/panels-ui.js b/src/web/public/panels-ui.js
-index ac84cb8..c287b05 100644
+index 26918a9..73cc0a6 100644
 --- a/src/web/public/panels-ui.js
 +++ b/src/web/public/panels-ui.js
-@@ -3109,8 +3109,13 @@ Object.assign(CodemanApp.prototype, {
+@@ -3867,8 +3867,13 @@ Object.assign(CodemanApp.prototype, {
        const res = await fetch('/api/mux-sessions/reconcile', { method: 'POST' });
        const data = await res.json();
  
--      if (data.dead && data.dead.length > 0) {
--        this.showToast(`Found ${data.dead.length} dead mux session(s)`, 'warning');
-+      const deadCount = data.dead?.length ?? 0;
-+      const discoveredCount = data.discovered?.length ?? 0;
+-      if (data.data?.dead && data.data.dead.length > 0) {
+-        this.showToast(`Found ${data.data.dead.length} dead mux session(s)`, 'warning');
++      const deadCount = data.data?.dead?.length ?? 0;
++      const discoveredCount = data.data?.discovered?.length ?? 0;
 +      if (deadCount > 0 || discoveredCount > 0) {
 +        const parts = [];
 +        if (discoveredCount > 0) parts.push(`discovered ${discoveredCount}`);
@@ -54,7 +61,7 @@ index ac84cb8..c287b05 100644
        } else {
          this.showToast('All mux sessions are alive', 'success');
 diff --git a/src/web/routes/mux-routes.ts b/src/web/routes/mux-routes.ts
-index b1264ae..567dc62 100644
+index 14b9376..7eaeea2 100644
 --- a/src/web/routes/mux-routes.ts
 +++ b/src/web/routes/mux-routes.ts
 @@ -23,7 +23,7 @@ export function registerMuxRoutes(app: FastifyInstance, ctx: InfraPort): void {
@@ -67,10 +74,10 @@ index b1264ae..567dc62 100644
    });
  
 diff --git a/src/web/server.ts b/src/web/server.ts
-index 703c8c7..f18009e 100644
+index 428630c..101b5a7 100644
 --- a/src/web/server.ts
 +++ b/src/web/server.ts
-@@ -503,6 +503,7 @@ export class WebServer extends EventEmitter {
+@@ -604,6 +604,7 @@ export class WebServer extends EventEmitter {
        pushStore: this.pushStore,
        startScheduledRun: this.startScheduledRun.bind(this),
        stopScheduledRun: this.stopScheduledRun.bind(this),
@@ -78,7 +85,7 @@ index 703c8c7..f18009e 100644
        // AuthPort
        authSessions: this.authSessions,
        qrAuthFailures: this.qrAuthFailures,
-@@ -1549,7 +1550,7 @@ export class WebServer extends EventEmitter {
+@@ -1883,7 +1884,7 @@ export class WebServer extends EventEmitter {
      // This prevents race conditions where clients connect before state is ready
      // CRITICAL: Skip in test mode to prevent tests from picking up user sessions
      if (!this.testMode) {
@@ -87,7 +94,7 @@ index 703c8c7..f18009e 100644
      }
  
      // Clean up stale sessions from state file that don't have active mux sessions
-@@ -1691,7 +1692,7 @@ export class WebServer extends EventEmitter {
+@@ -2089,7 +2090,7 @@ export class WebServer extends EventEmitter {
      return false;
    }
  
@@ -96,7 +103,7 @@ index 703c8c7..f18009e 100644
      try {
        // Reconcile mux sessions to find which ones are still alive (also discovers unknown ones)
        const { alive, dead, discovered } = await this.mux.reconcileSessions();
-@@ -1880,6 +1881,7 @@ export class WebServer extends EventEmitter {
+@@ -2296,6 +2297,7 @@ export class WebServer extends EventEmitter {
              }
  
              this.persistSessionState(session);
@@ -104,7 +111,7 @@ index 703c8c7..f18009e 100644
            }
          }
  
-@@ -1897,8 +1899,11 @@ export class WebServer extends EventEmitter {
+@@ -2313,8 +2315,11 @@ export class WebServer extends EventEmitter {
        if (dead.length > 0) {
          console.log(`[Server] Cleaned up ${dead.length} dead mux session(s)`);
        }
@@ -117,21 +124,10 @@ index 703c8c7..f18009e 100644
    }
  
 diff --git a/test/routes/mux-routes.test.ts b/test/routes/mux-routes.test.ts
-index fada50a..1697b36 100644
+index 999d645..421873d 100644
 --- a/test/routes/mux-routes.test.ts
 +++ b/test/routes/mux-routes.test.ts
-@@ -15,9 +15,7 @@ describe('mux-routes', () => {
-   beforeEach(async () => {
-     // Add mux methods that mux-routes needs but mock-route-context doesn't provide
-     harness = await createRouteTestHarness(registerMuxRoutes);
--    harness.ctx.mux.getSessionsWithStats = vi.fn(async () => [
--      { name: 'codeman-abc', pid: 1234, created: Date.now() },
--    ]);
-+    harness.ctx.mux.getSessionsWithStats = vi.fn(async () => [{ name: 'codeman-abc', pid: 1234, created: Date.now() }]);
-     harness.ctx.mux.isAvailable = vi.fn(() => true);
-     harness.ctx.mux.reconcileSessions = vi.fn(async () => ({
-       orphaned: [],
-@@ -95,8 +93,8 @@ describe('mux-routes', () => {
+@@ -93,8 +93,8 @@ describe('mux-routes', () => {
  
    describe('POST /api/mux-sessions/reconcile', () => {
      it('returns reconciliation result', async () => {
@@ -142,7 +138,7 @@ index fada50a..1697b36 100644
  
        const res = await harness.app.inject({
          method: 'POST',
-@@ -104,8 +102,9 @@ describe('mux-routes', () => {
+@@ -102,8 +102,9 @@ describe('mux-routes', () => {
        });
        expect(res.statusCode).toBe(200);
        const body = JSON.parse(res.body);

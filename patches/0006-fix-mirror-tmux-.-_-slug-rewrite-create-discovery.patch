@@ -1,0 +1,162 @@
+From 5dd2c8268006e6a61984532640fbc156e6324f48 Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 20:31:50 +0200
+Subject: [PATCH 06/10] fix: mirror tmux '.'/':'->'_' slug rewrite (create +
+ discovery)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Root cause of "new sessions don't work while existing ones do":
+superclaude's slug() (and tmux itself, on new-session) rewrite '.' and
+':' to '_' in session names because they are reserved target-spec
+separators (session:window.pane). Codeman's create path built the mux
+name from the RAW working dir, so tmux stored e.g. `sc|/h/u/_claude`
+while codeman kept `sc|/h/u/.claude` — every later `-t` target missed
+and the freshly created session could not be driven. Discovered
+sessions worked because their name is read back from tmux already
+rewritten.
+
+Empirically confirmed: `tmux new-session -ds "sc|/tmp/a.b:c"` stores
+`sc|/tmp/a_b_c`; `has-session -t "sc|/tmp/a.b:c"` -> "can't find
+session", `-t "sc|/tmp/a_b_c"` -> hit.
+
+- create: slugForSuperclaude() maps '.'/':'→'_' before `sc|<path>`,
+  exactly mirroring superclaude's `path//[.:]/_`; buildMuxName uses it;
+  pathFitsSuperclaudeSlug now also admits ':' (slug maps it).
+- discovery: the slug is lossy in reverse too, so reversing it gave a
+  wrong workingDir for dotted dirs. Read tmux's real
+  `#{pane_current_path}` (what superclaude's own `list` uses) via a new
+  paneCurrentPath() helper; fall back to the slug only on failure.
+- export slugForSuperclaude + regression tests.
+---
+ src/tmux-manager.ts             | 60 ++++++++++++++++++++++++++++-----
+ test/superclaude-compat.test.ts | 14 +++++++-
+ 2 files changed, 64 insertions(+), 10 deletions(-)
+
+diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
+index 25fd74c..3a74a05 100644
+--- a/src/tmux-manager.ts
++++ b/src/tmux-manager.ts
+@@ -117,12 +117,26 @@ const LEGACY_MUX_NAME_PATTERN = /^claudeman-[a-f0-9-]+$/;
+ const SUPERCLAUDE_MUX_NAME_PATTERN = /^sc\|\/[A-Za-z0-9._\-/~]+(?:-\d+)?$/;
+ 
+ /**
+- * Whether a working dir is shaped to fit the `sc|<abs-path>` slug — i.e. composed
+- * only of characters allowed by `SUPERCLAUDE_MUX_NAME_PATTERN`. Paths with spaces
+- * or other exotic characters fall back to the legacy `codeman-<id>` naming.
++ * Whether a working dir is shaped to fit the `sc|<abs-path>` slug — i.e. an
++ * absolute path composed only of characters that survive slugification (any of
++ * the allowed name chars, plus `.`/`:` which `slugForSuperclaude` maps to `_`).
++ * Paths with spaces or other exotic characters fall back to `codeman-<id>`.
+  */
+ function pathFitsSuperclaudeSlug(workingDir: string): boolean {
+-  return /^\/[A-Za-z0-9._\-/~]+$/.test(workingDir);
++  return /^\/[A-Za-z0-9._:\-/~]+$/.test(workingDir);
++}
++
++/**
++ * Mirror scharc/superclaude's `slug()`: tmux rewrites '.' and ':' to '_' in
++ * session names (they are reserved in target specs as `window.pane` /
++ * `session:window` separators), so the name we *create* must already carry the
++ * rewrite — otherwise tmux stores `sc|/x/a_b` while we keep `sc|/x/a.b`, and
++ * every later `-t` target misses (the session is created but can't be driven:
++ * the "new sessions don't work" bug). Discovered sessions are read back from
++ * tmux already-rewritten, which is why discovery worked while creation didn't.
++ */
++export function slugForSuperclaude(workingDir: string): string {
++  return `sc|${workingDir.replace(/[.:]/g, '_')}`;
+ }
+ 
+ /** Regex to validate tmux pane targets (e.g., "%0", "%1", "0", "1") */
+@@ -1438,7 +1452,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+     if (!pathFitsSuperclaudeSlug(workingDir)) {
+       return `codeman-${sessionId.slice(0, 8)}`;
+     }
+-    const base = `sc|${workingDir}`;
++    const base = slugForSuperclaude(workingDir);
+     if (!this.sessionExists(base)) return base;
+     for (let i = 2; i < 100; i++) {
+       const candidate = `${base}-${i}`;
+@@ -1462,6 +1476,29 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+     }
+   }
+ 
++  /**
++   * Real working directory of a session's active pane, via tmux's
++   * `#{pane_current_path}`. Used for discovered `sc|<slug>` sessions whose name
++   * is lossy ('.'/':' → '_'); reading the live cwd is exact. Uses `list-panes`
++   * (not `display-message`, whose `-t "=name"` exact-match form returns empty on
++   * a client-less session); `=` forces an exact target match on tmux's own
++   * stored name. Takes the first pane's cwd. Returns undefined on any failure so
++   * callers can fall back to the slug.
++   */
++  private paneCurrentPath(muxName: string): string | undefined {
++    if (!isValidMuxName(muxName)) return undefined;
++    try {
++      const out = execSync(`${this.tmux()} list-panes -t "=${muxName}" -F '#{pane_current_path}' 2>/dev/null`, {
++        encoding: 'utf-8',
++        timeout: EXEC_TIMEOUT_MS,
++      }).trim();
++      const first = out.split('\n')[0]?.trim();
++      return first && first.startsWith('/') ? first : undefined;
++    } catch {
++      return undefined;
++    }
++  }
++
+   // Get all child process PIDs recursively
+   private getChildPids(pid: number): number[] {
+     const pids: number[] = [];
+@@ -1714,12 +1751,17 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+       let workingDir = process.cwd();
+       let displayName = `Restored: ${sessionName}`;
+       if (isSuperclaude) {
+-        // sc|/abs/path[-N] — derive working dir from the slug and slugify for the id
++        // sc|/abs/path[-N]. The slug is LOSSY: superclaude/tmux map '.'/':' → '_'
++        // in the name, so reversing it gives a wrong dir for dotted paths. Prefer
++        // tmux's real `#{pane_current_path}` (the same source superclaude's own
++        // `list` uses); fall back to the slug only if the query fails.
+         const slug = sessionName.slice(3); // strip "sc|"
+-        const path = slug.replace(/-\d+$/, '');
+-        if (path.startsWith('/')) workingDir = path;
++        const slugPath = slug.replace(/-\d+$/, '');
++        const realPath = this.paneCurrentPath(sessionName);
++        if (realPath) workingDir = realPath;
++        else if (slugPath.startsWith('/')) workingDir = slugPath;
+         sessionId = `sc-${slug.replace(/[^A-Za-z0-9_-]+/g, '_')}`;
+-        displayName = `sc: ${slug}`;
++        displayName = `sc: ${realPath ?? slug}`;
+       } else {
+         const fragment = sessionName.replace(/^(?:codeman|claudeman)-/, '');
+         sessionId = `restored-${fragment}`;
+diff --git a/test/superclaude-compat.test.ts b/test/superclaude-compat.test.ts
+index 6ff5e4b..bf3ae5f 100644
+--- a/test/superclaude-compat.test.ts
++++ b/test/superclaude-compat.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, it, expect } from 'vitest';
+-import { parsePaneList } from '../src/tmux-manager';
++import { parsePaneList, slugForSuperclaude } from '../src/tmux-manager';
+ 
+ describe('superclaude compat', () => {
+   it('parses sc|<path> session names with pipes', () => {
+@@ -12,3 +12,15 @@ describe('superclaude compat', () => {
+     expect(r.get('sc|/home/u/proj-2')).toBe(9999);
+   });
+ });
++
++describe('slugForSuperclaude (create-side naming — must match superclaude slug())', () => {
++  it('leaves a plain path unchanged', () => {
++    expect(slugForSuperclaude('/x/coding/02-private/superclaude')).toBe('sc|/x/coding/02-private/superclaude');
++  });
++  it("rewrites '.' and ':' to '_' exactly like tmux does on new-session", () => {
++    // Regression: raw names kept a '.'/':' that tmux silently rewrote to '_',
++    // so every later `-t` target missed and created sessions could not be driven.
++    expect(slugForSuperclaude('/home/scharc/.claude')).toBe('sc|/home/scharc/_claude');
++    expect(slugForSuperclaude('/x/repos/v1.2:beta')).toBe('sc|/x/repos/v1_2_beta');
++  });
++});
+-- 
+2.43.0
+

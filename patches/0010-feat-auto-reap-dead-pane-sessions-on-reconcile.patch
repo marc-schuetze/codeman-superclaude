@@ -1,0 +1,130 @@
+From e82e2c4c46553c94547e3e00d3473fc8d0d2e824 Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 21:49:05 +0200
+Subject: [PATCH 10/10] feat: auto-reap dead-pane sessions on reconcile
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Codeman sets remain-on-exit, so an exited session's pane stays "dead"
+(final output visible) and reconcile — which only checks pane existence —
+keeps it as a live tab forever. Background exited sessions piled up as
+zombies (codeman only respawns a dead pane on re-attach).
+
+Add mux.getDeadPaneNames() (one `list-panes -a -f '#{pane_dead}'`) and a
+server reapDeadPaneSessions() run after each periodic reconcile: it
+cleanupSession()s any session whose pane has died, EXCEPT ones that want
+the dead pane to restart later — scheduled usage-limit auto-resume, or an
+active/pending respawn (Ralph) controller. Per-session try/catch so the
+expected already-dead-PTY kill (ESRCH) can't abort the sweep.
+
+Verified: an exited shell session is removed within one interval while a
+live session is untouched.
+---
+ src/mux-interface.ts |  3 +++
+ src/tmux-manager.ts  | 19 +++++++++++++++++++
+ src/web/server.ts    | 35 +++++++++++++++++++++++++++++++++--
+ 3 files changed, 55 insertions(+), 2 deletions(-)
+
+diff --git a/src/mux-interface.ts b/src/mux-interface.ts
+index c8153f1..069149c 100644
+--- a/src/mux-interface.ts
++++ b/src/mux-interface.ts
+@@ -224,6 +224,9 @@ export interface TerminalMultiplexer extends EventEmitter {
+   /** Check if the pane in a session is dead (command exited but remain-on-exit keeps it alive) */
+   isPaneDead(muxName: string): boolean;
+ 
++  /** Session names whose active pane has died (command exited; remain-on-exit keeps it). */
++  getDeadPaneNames(): string[];
++
+   /** Respawn a dead pane with a fresh command. Returns the new PID or null on failure. */
+   respawnPane(options: RespawnPaneOptions): Promise<number | null>;
+ 
+diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
+index 37345fa..6a181e7 100644
+--- a/src/tmux-manager.ts
++++ b/src/tmux-manager.ts
+@@ -1348,6 +1348,25 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+     }
+   }
+ 
++  /**
++   * All session names whose active pane has DIED (command exited; remain-on-exit
++   * keeps the pane so its final output stays visible). One `list-panes -a` using
++   * tmux's own `-f` filter — cheaper than an `isPaneDead` call per session. Used
++   * by the server to reap zombie sessions on the periodic reconcile.
++   */
++  getDeadPaneNames(): string[] {
++    if (IS_TEST_MODE) return [];
++    try {
++      const output = execSync(
++        `${this.tmux()} list-panes -a -f '#{pane_dead}' -F '#{session_name}' 2>/dev/null || true`,
++        { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS }
++      ).trim();
++      return output ? output.split('\n').filter(Boolean) : [];
++    } catch {
++      return [];
++    }
++  }
++
+   /**
+    * Respawn a dead pane in an existing tmux session.
+    * Uses `tmux respawn-pane -k` to restart the command in the same pane,
+diff --git a/src/web/server.ts b/src/web/server.ts
+index 2f3c6ad..e4a1842 100644
+--- a/src/web/server.ts
++++ b/src/web/server.ts
+@@ -1983,10 +1983,13 @@ export class WebServer extends EventEmitter {
+     // live. It dedups by muxName, so already-tracked sessions are no-ops.
+     this.cleanup.setInterval(
+       () => {
+-        void this.reconcileMuxSessions();
++        void (async () => {
++          await this.reconcileMuxSessions();
++          await this.reapDeadPaneSessions();
++        })();
+       },
+       MUX_RECONCILE_INTERVAL,
+-      { description: 'periodic mux-session reconcile (external session discovery)' }
++      { description: 'periodic mux-session reconcile + dead-pane reap' }
+     );
+ 
+     // Start subagent watcher for Claude Code background agent visibility (if enabled)
+@@ -2105,6 +2108,34 @@ export class WebServer extends EventEmitter {
+     return false;
+   }
+ 
++  /**
++   * Reap sessions whose pane has DIED (command exited; remain-on-exit keeps the
++   * dead pane so its final output stays visible). Without this they pile up as
++   * zombie tabs — codeman only respawns a dead pane when you re-attach, so
++   * background ones never clear. Skips sessions that intentionally keep a dead
++   * pane to restart it later: a scheduled usage-limit auto-resume, or an
++   * active/pending respawn (Ralph) controller.
++   */
++  private async reapDeadPaneSessions(): Promise<void> {
++    const deadNames = new Set(this.mux.getDeadPaneNames());
++    if (deadNames.size === 0) return;
++    // Snapshot: cleanupSession mutates this.sessions.
++    for (const [id, session] of Array.from(this.sessions)) {
++      const muxName = session.muxName;
++      if (!muxName || !deadNames.has(muxName)) continue;
++      if (session.autoResumeEnabled) continue;
++      if (this.respawnControllers.has(id) || this.respawnTimers.has(id)) continue;
++      console.log(`[Server] Reaping dead-pane session ${muxName}`);
++      try {
++        await this.cleanupSession(id, true, 'dead_pane_reap');
++      } catch (err) {
++        // Reaping an exited session hits an already-dead PTY (kill ESRCH) — the
++        // session is still removed; don't let it abort the rest of the sweep.
++        console.error(`[Server] Reap of ${muxName} raised (non-fatal):`, err);
++      }
++    }
++  }
++
+   async reconcileMuxSessions(): Promise<{ alive: string[]; dead: string[]; discovered: string[] }> {
+     try {
+       // Reconcile mux sessions to find which ones are still alive (also discovers unknown ones)
+-- 
+2.43.0
+

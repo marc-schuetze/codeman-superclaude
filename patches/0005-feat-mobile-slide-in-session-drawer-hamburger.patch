@@ -1,0 +1,266 @@
+From 1d18b435eb76645c911269e580e113ecc60790ff Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 20:18:34 +0200
+Subject: [PATCH 05/10] feat(mobile): slide-in session drawer (hamburger)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds a mobile-only left drawer that lists open sessions vertically,
+toggled by a hamburger button in the header. Repurposes the existing
+close-X, alert flashing all unchanged) and restyles it as the drawer
+body via `body.session-drawer-open` in mobile.css.
+
+- index.html: hamburger button (left of logo) + backdrop div placed
+  OUTSIDE <header> so it escapes the header's stacking context
+  (backdrop-filter + contain trap children at z-index 100).
+- mobile.css: appended drawer block; overrides the horizontal-scroll
+  tab rules under @media (max-width: 768px), two-class specificity to
+  beat `.session-tabs.tabs-two-rows`.
+- session-ui.js: toggle/open/closeSessionDrawer(); capture-phase tap
+  handler dismisses the drawer on tab select (ignores gear/close-X).
+
+All additive — additions anchored on stable upstream elements to keep
+the patch update-safe across Codeman bumps.
+---
+ src/web/public/index.html    |  12 +++-
+ src/web/public/mobile.css    | 105 +++++++++++++++++++++++++++++++++++
+ src/web/public/session-ui.js |  72 ++++++++++++++++++++++++
+ 3 files changed, 188 insertions(+), 1 deletion(-)
+
+diff --git a/src/web/public/index.html b/src/web/public/index.html
+index 3f6edd2..2f01604 100644
+--- a/src/web/public/index.html
++++ b/src/web/public/index.html
+@@ -76,10 +76,15 @@
+     <!-- Compact Header with Session Tabs -->
+     <header class="header">
+       <div class="header-brand">
++        <button class="btn-session-drawer" id="btnSessionDrawer" onclick="app.toggleSessionDrawer()" aria-label="Toggle session drawer" aria-controls="sessionTabs" aria-expanded="false">
++          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
++        </button>
+         <span class="logo" onclick="app.goHome()" title="Go to main page">Codeman</span>
+       </div>
+ 
+-      <!-- Session Tabs -->
++      <!-- Session Tabs (doubles as the drawer body on mobile, reparented to
++           <body> at script load on mobile to escape the header's stacking
++           context — see session-ui.js IIFE). -->
+       <div class="session-tabs" id="sessionTabs" role="tablist" aria-label="Session tabs">
+       </div>
+ 
+@@ -136,6 +141,11 @@
+       </div>
+     </header>
+ 
++    <!-- Session drawer backdrop (mobile only, shown when drawer open).
++         Lives outside <header> so it escapes the header's stacking context
++         (backdrop-filter + contain trap children at z-index 100). -->
++    <div class="session-drawer-backdrop" id="sessionDrawerBackdrop" onclick="app.closeSessionDrawer()"></div>
++
+     <!-- Timer Banner (shown when timed run is active) -->
+     <div class="timer-banner" id="timerBanner" style="display: none;">
+       <div class="timer-content">
+diff --git a/src/web/public/mobile.css b/src/web/public/mobile.css
+index ed681b3..d6f5323 100644
+--- a/src/web/public/mobile.css
++++ b/src/web/public/mobile.css
+@@ -2242,3 +2242,108 @@ html.mobile-init .file-browser-panel {
+     padding: 4px 7px;
+   }
+ }
++
++/* ============================================================================
++   Session Drawer (mobile)
++   Repurposes #sessionTabs as a slide-in left drawer. Hamburger button in the
++   header toggles `body.session-drawer-open`. Existing tab renderer (status
++   dots, badges, gear, close-X, alert flashing) is unchanged.
++   ============================================================================ */
++
++.btn-session-drawer {
++  display: none;
++}
++
++.session-drawer-backdrop {
++  display: none;
++}
++
++@media (max-width: 768px) {
++  /* Hamburger button — shown only on mobile, sits left of the logo */
++  .btn-session-drawer {
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    width: 32px;
++    height: 32px;
++    margin-right: 0.35rem;
++    padding: 0;
++    background: transparent;
++    border: 1px solid rgba(255, 255, 255, 0.15);
++    border-radius: 4px;
++    color: var(--text, #e5e7eb);
++    cursor: pointer;
++    flex-shrink: 0;
++  }
++
++  .btn-session-drawer:active {
++    background: rgba(255, 255, 255, 0.08);
++  }
++
++  /* Backdrop — covers the screen behind the drawer */
++  .session-drawer-backdrop {
++    position: fixed;
++    inset: 0;
++    background: rgba(0, 0, 0, 0.5);
++    z-index: 10000;
++    opacity: 0;
++    pointer-events: none;
++    transition: opacity 0.2s ease;
++  }
++
++  body.session-drawer-open .session-drawer-backdrop {
++    display: block;
++    opacity: 1;
++    pointer-events: auto;
++  }
++
++  /* Override the horizontal-scroll mobile rules: drawer is a vertical column
++     fixed to the left edge, off-screen by default. Specificity must beat
++     `.session-tabs.tabs-two-rows` (0,2,0) — using two class selectors. */
++  .session-tabs,
++  .session-tabs.tabs-two-rows {
++    position: fixed;
++    top: 0;
++    left: 0;
++    bottom: 0;
++    width: 82vw;
++    max-width: 340px;
++    max-height: none;
++    flex: none;
++    flex-direction: column;
++    flex-wrap: nowrap;
++    overflow-x: hidden;
++    overflow-y: auto;
++    gap: 4px;
++    padding: 0.75rem 0.5rem;
++    padding-top: calc(0.75rem + var(--safe-area-top, env(safe-area-inset-top)));
++    padding-bottom: calc(0.75rem + var(--safe-area-bottom, env(safe-area-inset-bottom)));
++    background: var(--bg-darker, #0b0d12);
++    border-right: 1px solid rgba(255, 255, 255, 0.08);
++    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.4);
++    transform: translateX(-100%);
++    transition: transform 0.22s ease;
++    z-index: 10001;
++  }
++
++  body.session-drawer-open .session-tabs,
++  body.session-drawer-open .session-tabs.tabs-two-rows {
++    transform: translateX(0);
++  }
++
++  /* Each tab fills the drawer width, stacks vertically */
++  .session-tab {
++    flex: 0 0 auto;
++    min-height: 44px;
++    max-height: none;
++    width: 100%;
++    padding: 0.6rem 0.7rem;
++    font-size: 0.85rem;
++    border-radius: 6px;
++  }
++
++  /* Let the name take the remaining width — no truncation in the drawer */
++  .session-tab .tab-name {
++    max-width: none;
++  }
++}
+diff --git a/src/web/public/session-ui.js b/src/web/public/session-ui.js
+index 733276b..fdf68ff 100644
+--- a/src/web/public/session-ui.js
++++ b/src/web/public/session-ui.js
+@@ -1560,6 +1560,51 @@ Object.assign(CodemanApp.prototype, {
+     document.getElementById('mobileCasePickerModal').classList.remove('active');
+   },
+ 
++  // ═══════════════════════════════════════════════════════════════
++  // Mobile Session Drawer
++  // Slide-in left drawer that lists open sessions vertically. Reuses the
++  // existing #sessionTabs element (and its renderer) — mobile.css restyles
++  // it as the drawer body when body.session-drawer-open is set.
++  // ═══════════════════════════════════════════════════════════════
++
++  toggleSessionDrawer() {
++    if (document.body.classList.contains('session-drawer-open')) {
++      this.closeSessionDrawer();
++    } else {
++      this.openSessionDrawer();
++    }
++  },
++
++  openSessionDrawer() {
++    document.body.classList.add('session-drawer-open');
++    const btn = document.getElementById('btnSessionDrawer');
++    if (btn) btn.setAttribute('aria-expanded', 'true');
++    // First-time setup: close the drawer when a session tab is tapped.
++    // Capture phase so the close fires even if a child element (gear, close-X)
++    // calls stopPropagation on the bubble phase.
++    if (!this._sessionDrawerTapWired) {
++      const tabs = document.getElementById('sessionTabs');
++      if (tabs) {
++        tabs.addEventListener('click', (ev) => {
++          if (!document.body.classList.contains('session-drawer-open')) return;
++          const tab = ev.target.closest('.session-tab');
++          // Ignore taps on the gear or close-X — those have their own actions
++          // and shouldn't dismiss the drawer.
++          if (tab && !ev.target.closest('.tab-gear, .tab-close')) {
++            this.closeSessionDrawer();
++          }
++        }, true);
++      }
++      this._sessionDrawerTapWired = true;
++    }
++  },
++
++  closeSessionDrawer() {
++    document.body.classList.remove('session-drawer-open');
++    const btn = document.getElementById('btnSessionDrawer');
++    if (btn) btn.setAttribute('aria-expanded', 'false');
++  },
++
+   selectMobileCase(caseName) {
+     // Update the desktop select (source of truth)
+     const select = document.getElementById('quickStartCase');
+@@ -1630,3 +1675,30 @@ Object.defineProperty(CodemanApp.prototype, 'runMode', {
+       mode === 'opencode' || mode === 'codex' || mode === 'gemini' || mode === 'claude' ? mode : 'claude';
+   },
+ });
++
++// Reparent #sessionTabs out of <header> when the drawer CSS is active so the
++// drawer escapes the header's stacking context (.header has backdrop-filter
++// + `contain`, both create a stacking context that caps any child at z-index
++// 100, so a fixed drawer inside would sit under the terminal). Tied to the
++// same media query as mobile.css so it stays in sync. On desktop the element
++// stays inside the header where the existing flex layout expects it. Runs at
++// script load (defer guarantees DOM is parsed and constructor hasn't run yet).
++(() => {
++  try {
++    const mq = window.matchMedia('(max-width: 768px)');
++    const tabs = document.getElementById('sessionTabs');
++    if (!tabs) return;
++    const originalParent = tabs.parentElement;
++    const apply = () => {
++      if (mq.matches) {
++        if (tabs.parentElement !== document.body) document.body.appendChild(tabs);
++      } else {
++        if (tabs.parentElement === document.body && originalParent) {
++          originalParent.appendChild(tabs);
++        }
++      }
++    };
++    apply();
++    mq.addEventListener('change', apply);
++  } catch (_) { /* ignore — drawer just won't escape stacking context */ }
++})();
+-- 
+2.43.0
+

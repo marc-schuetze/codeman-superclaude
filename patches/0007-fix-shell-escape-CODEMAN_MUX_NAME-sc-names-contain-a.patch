@@ -1,0 +1,44 @@
+From 6bb269de12472393cfd595b81e6a3c863567cbe1 Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 21:14:13 +0200
+Subject: [PATCH 07/10] fix: shell-escape CODEMAN_MUX_NAME (sc| names contain a
+ pipe)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+buildEnvExports emitted `export CODEMAN_MUX_NAME=${muxName}` unquoted.
+Fine for upstream `codeman-<hex>` names, but our create-naming patch
+produces `sc|/abs/path` — the literal `|` is a shell pipe in the
+`export NAME=value && …` launch string. Bash parsed it as
+`export CODEMAN_MUX_NAME=sc | /abs/path && claude …`, piping into the
+working directory as a command → "bash: line 1: <dir>: Is a directory"
+(exit 126), so every web-created session died on spawn.
+
+Shell-escape the value (helper already used for every other name
+interpolation in this file). Verified: a fresh web-created session now
+launches `claude` instead of dying.
+---
+ src/tmux-manager.ts | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
+index 3a74a05..37345fa 100644
+--- a/src/tmux-manager.ts
++++ b/src/tmux-manager.ts
+@@ -970,7 +970,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+       ...(mode === 'codex' || mode === 'gemini' ? ['unset NO_COLOR'] : []),
+       'export CODEMAN_MUX=1',
+       `export CODEMAN_SESSION_ID=${sessionId}`,
+-      `export CODEMAN_MUX_NAME=${muxName}`,
++      // Shell-escape: superclaude-style mux names contain a literal `|`
++      // (`sc|/abs/path`), which is a pipe in the unquoted `export NAME=value &&
++      // …` launch string — bash would pipe `export …=sc` into the working dir
++      // as a command ("Is a directory", exit 126) and the session dies on spawn.
++      `export CODEMAN_MUX_NAME=${shellescape(muxName)}`,
+       `export CODEMAN_API_URL=${process.env.CODEMAN_API_URL || 'http://localhost:3000'}`,
+       // Path only (not the secret value): hook curl commands cat the file at
+       // execution time, so the COD-54 hook secret stays off the command line.
+-- 
+2.43.0
+

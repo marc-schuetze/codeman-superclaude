@@ -1,0 +1,84 @@
+From 333219752858cfc782d0cf4b9a51cb78cba5903a Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 21:27:39 +0200
+Subject: [PATCH 08/10] feat(mobile): close-[x] on every drawer row + reveal
+ confirm modal
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The session drawer reuses #sessionTabs, whose per-tab close-[x] is hidden
+on non-active tabs by the compact horizontal-strip mobile rule — so in the
+vertical drawer only the active row had an [x]. Drawer rows are full-width,
+so show `.tab-close` on every row (higher-specificity override). The [x]
+already calls app.requestCloseSession(), which spawns codeman's existing
+"Close Session" modal (Remove Tab / Kill Tmux & Claude Code).
+
+Also: tapping the drawer [x] now dismisses the drawer (like selecting a
+tab) so the confirm modal is fully visible instead of hidden behind the
+82vw drawer. The gear keeps its own behavior.
+---
+ src/web/public/mobile.css    | 23 +++++++++++++++++++++++
+ src/web/public/session-ui.js | 13 ++++++++-----
+ 2 files changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/src/web/public/mobile.css b/src/web/public/mobile.css
+index d6f5323..ee53af9 100644
+--- a/src/web/public/mobile.css
++++ b/src/web/public/mobile.css
+@@ -2345,5 +2345,28 @@ html.mobile-init .file-browser-panel {
+   /* Let the name take the remaining width — no truncation in the drawer */
+   .session-tab .tab-name {
+     max-width: none;
++    flex: 1 1 auto;
++    min-width: 0;
++  }
++
++  /* Drawer rows are full-width with room to spare, so show the close [x] on
++     EVERY row — not just the active one like the compact horizontal tab strip
++     (that rule lives above and only .active tabs escape it). The [x] already
++     calls app.requestCloseSession(), which spawns the same confirm modal as
++     codeman's tab close; the drawer tap handler ignores .tab-close, so tapping
++     it opens the modal without dismissing the drawer. Higher specificity
++     (.session-tabs .session-tab .tab-close) beats the display:none rule. */
++  .session-tabs .session-tab .tab-close {
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    font-size: 1.2rem;
++    line-height: 1;
++    width: 32px;
++    min-width: 32px;
++    height: 32px;
++    margin-left: auto;
++    flex: 0 0 auto;
++    opacity: 0.7;
+   }
+ }
+diff --git a/src/web/public/session-ui.js b/src/web/public/session-ui.js
+index fdf68ff..acafc15 100644
+--- a/src/web/public/session-ui.js
++++ b/src/web/public/session-ui.js
+@@ -1588,11 +1588,14 @@ Object.assign(CodemanApp.prototype, {
+         tabs.addEventListener('click', (ev) => {
+           if (!document.body.classList.contains('session-drawer-open')) return;
+           const tab = ev.target.closest('.session-tab');
+-          // Ignore taps on the gear or close-X — those have their own actions
+-          // and shouldn't dismiss the drawer.
+-          if (tab && !ev.target.closest('.tab-gear, .tab-close')) {
+-            this.closeSessionDrawer();
+-          }
++          if (!tab) return;
++          // The gear opens the session-options overlay and manages its own
++          // state — leave the drawer alone. Everything else dismisses the
++          // drawer: selecting a tab, OR the close-[x] (whose own onclick then
++          // spawns the confirm modal, now fully visible instead of hidden
++          // behind the 82vw drawer).
++          if (ev.target.closest('.tab-gear')) return;
++          this.closeSessionDrawer();
+         }, true);
+       }
+       this._sessionDrawerTapWired = true;
+-- 
+2.43.0
+

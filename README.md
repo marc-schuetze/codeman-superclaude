@@ -6,45 +6,58 @@ produced by [scharc/superclaude][superclaude] and to treat them as
 externally-managed.
 
 The two upstream projects are independent; this repo is only the *integration
-glue*: 4 patches that extend Codeman's session-discovery, a Dockerfile that
-builds it from a pinned commit, a compose file with the right host mounts to
-drive the host's tmux server, and a Forgejo Actions workflow that publishes
-the image.
+glue*: a series of patches that make Codeman and superclaude share one tmux
+namespace (plus a couple of mobile-UI niceties), a Dockerfile that builds it
+from a pinned commit, a compose file with the right host mounts to drive the
+host's tmux server, and a Forgejo Actions workflow that publishes the image.
 
 ## What it does
 
-- Codeman's `tmux-manager.ts` ships with `codeman-*` and `claudeman-*` as the
-  only allowed session-name prefixes. Patch 0001 adds a third pattern,
-  `^sc\|/<abs-path>(?:-\d+)?$`, so superclaude's sticky-per-cwd sessions
-  show up in the web UI. `parsePaneList` is switched from `indexOf('|')` to a
-  regex anchored on the rightmost `|<digits>` block, so session names that
-  themselves contain `|` parse correctly. The upstream installer's
-  `alias sc='tmux-chooser'` line is skipped to avoid clobbering the `sc`
-  binary that comes with superclaude.
-- Patch 0002 makes Codeman *create* new sessions using the same
-  `sc|<abs-path>[-N]` naming when the working dir fits the slug, so the
-  picker, web UI, and terminal all share one namespace.
-- Patch 0003 fixes the reconcile endpoint so discovered sessions get wrapped
-  in server-side `Session` objects (otherwise the monitor panel renders them
-  as `UNKNOWN`).
-- Patch 0004 marks discovered sessions with a `discovered: true` flag and
-  skips them in the periodic mouse-mode sync — externally-managed sessions
-  may be terminal-attached and their `tmux set mouse on` should not be
-  silently flipped off by Codeman's xterm.js-selection optimisation.
+Session-namespace integration (`sc|<abs-path>` sessions shared between the
+`sc` picker/terminal and the Codeman web UI):
 
-Everything else (web UI, respawn controller, subagent watcher, zerolag input
-overlay, QR auth) is unmodified upstream.
+- **0001 discover** — Codeman's `tmux-manager.ts` only allows `codeman-*` /
+  `claudeman-*` prefixes. Adds `^sc\|/<abs-path>(?:-\d+)?$`, and switches
+  `parsePaneList` from `indexOf('|')` to a regex anchored on the rightmost
+  `|<digits>` block so names containing `|` parse. Skips the installer's
+  `alias sc='tmux-chooser'` so it doesn't clobber superclaude's `sc`.
+- **0002 create** — Codeman *creates* new sessions with the same
+  `sc|<abs-path>[-N]` naming when the working dir fits the slug, so picker,
+  web UI and terminal share one namespace.
+- **0003 reconcile-wrap** — discovered sessions get wrapped in server-side
+  `Session` objects (else the monitor panel shows them `UNKNOWN`); broadcasts
+  `SessionCreated` so tabs appear without a refresh.
+- **0004 mouse-skip** — marks discovered sessions `discovered: true` and skips
+  them in the mouse-mode sync (they may be terminal-attached).
+- **0006 slug-rewrite** — mirror superclaude's `slug()`: tmux rewrites `.`/`:`
+  to `_` in session names, so create must too (else the stored name and the
+  target diverge → the session can't be driven). Discovery reads the real
+  `#{pane_current_path}` instead of the lossy reverse-slug.
+- **0007 shell-escape** — shell-escape `CODEMAN_MUX_NAME` in the launch env
+  exports: `sc|<path>` contains a literal `|` that was parsed as a pipe,
+  running the working dir as a command ("Is a directory", exit 126) — every
+  web-created session died on spawn.
+- **0009 periodic-reconcile** — reconcile on a timer so externally-created
+  (`sc`) sessions are auto-discovered without a manual reconcile / restart.
+- **0010 dead-pane reap** — reap sessions whose pane exited (remain-on-exit
+  keeps a dead pane) so zombies don't pile up; skips auto-resume / respawn.
+
+Mobile UI (upstream is unopinionated here):
+
+- **0005 session drawer** — slide-in left drawer (hamburger) listing sessions
+  vertically on phones; reuses `#sessionTabs`, reparented out of `<header>`.
+- **0008 drawer close-[x]** — show the per-row close-[x] on every drawer row
+  (not just the active tab) and dismiss the drawer to reveal the confirm modal.
+
+Everything else (respawn controller, subagent watcher, zerolag input overlay,
+QR auth) is unmodified upstream.
 
 ## Layout
 
 ```
 .
-├── CODEMAN_COMMIT                         pinned upstream short SHA
-├── patches/
-│   ├── 0001-discover-superclaude-sessions.patch
-│   ├── 0002-create-with-superclaude-naming.patch
-│   ├── 0003-wrap-discovered-as-sessions.patch
-│   └── 0004-skip-mouse-toggle-on-discovered.patch
+├── CODEMAN_COMMIT                         pinned upstream full SHA
+├── patches/                               0001..0010 (git format-patch series)
 ├── docker/
 │   ├── Dockerfile                         multi-stage; clones + patches + builds
 │   ├── compose.yml                        deployment compose (zkm-infra desktop)

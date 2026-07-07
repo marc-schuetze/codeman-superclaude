@@ -1,0 +1,74 @@
+From e4796108448a6dab9544bc43c0dd142a1d126ad9 Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 21:41:35 +0200
+Subject: [PATCH 09/10] feat: periodic reconcile so external sessions
+ auto-appear
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Codeman only reconciled mux sessions on boot — there's no socket watch —
+so a session created OUTSIDE Codeman (e.g. `sc n` superclaude on the
+shared -L codeman socket) never showed up until a manual reconcile or a
+restart. Add a periodic reconcileMuxSessions() timer (MUX_RECONCILE_INTERVAL,
+4s). It dedups by muxName (tracked sessions are no-ops) and broadcasts
+SessionCreated for each newly-wrapped session, so tabs appear live over SSE.
+One `tmux list-panes -a` per tick — cheap.
+---
+ src/config/server-timing.ts |  6 ++++++
+ src/web/server.ts           | 15 +++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/src/config/server-timing.ts b/src/config/server-timing.ts
+index adbc6ef..9c86b1d 100644
+--- a/src/config/server-timing.ts
++++ b/src/config/server-timing.ts
+@@ -26,6 +26,12 @@ export const TASK_UPDATE_BATCH_INTERVAL = 100;
+  * excessive bandwidth. Also serves as dead-client detection. */
+ export const SSE_HEARTBEAT_INTERVAL = 15 * 1000;
+ 
++/** How often to reconcile mux sessions so sessions created OUTSIDE Codeman
++ * (e.g. `sc` superclaude sessions on the shared `-L codeman` socket) are
++ * auto-discovered and pushed to clients. One `tmux list-panes -a` per tick —
++ * cheap; dedups by muxName so tracked sessions are no-ops. */
++export const MUX_RECONCILE_INTERVAL = 4 * 1000;
++
+ /** SSE padding size (bytes). Cloudflare quick tunnels buffer small SSE events;
+  * appending ~8KB of SSE comment padding forces the proxy to flush immediately.
+  * SSE comments (lines starting with ':') are silently ignored by EventSource. */
+diff --git a/src/web/server.ts b/src/web/server.ts
+index 101b5a7..2f3c6ad 100644
+--- a/src/web/server.ts
++++ b/src/web/server.ts
+@@ -172,6 +172,7 @@ import {
+   SCHEDULED_CLEANUP_INTERVAL,
+   SCHEDULED_RUN_MAX_AGE,
+   SSE_HEARTBEAT_INTERVAL,
++  MUX_RECONCILE_INTERVAL,
+   SESSION_LIMIT_WAIT_MS,
+   ITERATION_PAUSE_MS,
+   STATS_COLLECTION_INTERVAL_MS,
+@@ -1974,6 +1975,20 @@ export class WebServer extends EventEmitter {
+       { description: 'periodic token recording' }
+     );
+ 
++    // Periodically reconcile so sessions created OUTSIDE Codeman — e.g. `sc`
++    // superclaude sessions on the shared `-L codeman` socket — are discovered
++    // and pushed to clients without a manual reconcile / restart. Boot only
++    // reconciled once; there is no socket watch. reconcileMuxSessions()
++    // broadcasts SessionCreated for each newly-wrapped session, so tabs appear
++    // live. It dedups by muxName, so already-tracked sessions are no-ops.
++    this.cleanup.setInterval(
++      () => {
++        void this.reconcileMuxSessions();
++      },
++      MUX_RECONCILE_INTERVAL,
++      { description: 'periodic mux-session reconcile (external session discovery)' }
++    );
++
+     // Start subagent watcher for Claude Code background agent visibility (if enabled)
+     if (await this.isSubagentTrackingEnabled()) {
+       subagentWatcher.start();
+-- 
+2.43.0
+

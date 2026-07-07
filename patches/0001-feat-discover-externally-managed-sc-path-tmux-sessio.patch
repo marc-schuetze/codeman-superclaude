@@ -1,7 +1,8 @@
-From b4626454c177fa1f89078ab547dc1da513caab10 Mon Sep 17 00:00:00 2001
+From 6ac64015e42f96ad97c0ef4ce3e915c6f63b8c40 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Wed, 6 May 2026 21:04:23 +0200
-Subject: [PATCH 1/4] feat: discover externally-managed sc|<path> tmux sessions
+Subject: [PATCH 01/10] feat: discover externally-managed sc|<path> tmux
+ sessions
 
 Adds a third allowed mux-name pattern for sessions named `sc|<absolute-path>[-N]`
 (produced by scharc/superclaude). Discovery and isValidMuxName accept them;
@@ -13,12 +14,18 @@ Skips the `alias sc=tmux-chooser` line in install.sh to avoid clobbering
 superclaude's existing `sc` binary.
 
 Adds test/superclaude-compat.test.ts covering the parser change.
+---
+ install.sh                      |  8 +++---
+ src/tmux-manager.ts             | 48 ++++++++++++++++++++++++++-------
+ test/superclaude-compat.test.ts | 14 ++++++++++
+ 3 files changed, 55 insertions(+), 15 deletions(-)
+ create mode 100644 test/superclaude-compat.test.ts
 
 diff --git a/install.sh b/install.sh
-index 4ced9a3..813bc5d 100755
+index cd0e265..9e428e8 100755
 --- a/install.sh
 +++ b/install.sh
-@@ -791,11 +791,9 @@ setup_sc_alias() {
+@@ -812,11 +812,9 @@ setup_sc_alias() {
          return 0
      fi
  
@@ -34,10 +41,10 @@ index 4ced9a3..813bc5d 100755
  
  # ============================================================================
 diff --git a/src/tmux-manager.ts b/src/tmux-manager.ts
-index 880dbf4..f85cbd7 100644
+index 0af5caa..c965211 100644
 --- a/src/tmux-manager.ts
 +++ b/src/tmux-manager.ts
-@@ -95,6 +95,9 @@ const SAFE_MUX_NAME_PATTERN = /^codeman-[a-f0-9-]+$/;
+@@ -113,6 +113,9 @@ const SAFE_MUX_NAME_PATTERN = /^codeman-[a-f0-9-]+$/;
  /** Legacy pattern for pre-rename sessions (claudeman- prefix) */
  const LEGACY_MUX_NAME_PATTERN = /^claudeman-[a-f0-9-]+$/;
  
@@ -47,7 +54,7 @@ index 880dbf4..f85cbd7 100644
  /** Regex to validate tmux pane targets (e.g., "%0", "%1", "0", "1") */
  const SAFE_PANE_TARGET_PATTERN = /^(%\d+|\d+)$/;
  
-@@ -121,14 +124,22 @@ const PANE_LIST_FORMAT = `#{session_name}${PANE_LIST_SEP}#{pane_pid}`;
+@@ -159,14 +162,22 @@ export function buildNofileLimitCommand(targetLimit = CLAUDE_CODE_NOFILE_LIMIT):
   * - Skips empty lines and lines without the separator.
   * - Skips entries with a non-numeric pid or empty name.
   */
@@ -74,7 +81,7 @@ index 880dbf4..f85cbd7 100644
      if (name && !Number.isNaN(pid)) {
        result.set(name, pid);
      }
-@@ -144,7 +155,9 @@ const UNSAFE_PATH_CHARS = /[;&|$`(){}<>'"\n\r]/;
+@@ -461,7 +472,9 @@ const UNSAFE_PATH_CHARS = /[;&|$`(){}<>'"\n\r]/;
   * Prevents command injection via malformed session IDs.
   */
  function isValidMuxName(name: string): boolean {
@@ -84,15 +91,20 @@ index 880dbf4..f85cbd7 100644
 +  );
  }
  
- /**
-@@ -1022,20 +1035,35 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+ function isValidTerminalDimension(value: number): boolean {
+@@ -1650,7 +1663,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
      }
  
-     for (const [sessionName, pid] of activeSessions) {
+     for (const [sessionName, pid] of active) {
 -      if (!sessionName.startsWith('codeman-') && !sessionName.startsWith('claudeman-')) continue;
 +      const isCodeman = sessionName.startsWith('codeman-') || sessionName.startsWith('claudeman-');
 +      const isSuperclaude = SUPERCLAUDE_MUX_NAME_PATTERN.test(sessionName);
 +      if (!isCodeman && !isSuperclaude) continue;
+       // Only admit names that pass the safe-name pattern. A foreign process on the
+       // shared `tmux -L codeman` socket could create a `codeman-…` session whose name
+       // contains shell metacharacters; rejecting it here keeps it out of this.sessions
+@@ -1661,17 +1676,30 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
+       }
        if (knownMuxNames.has(sessionName)) continue;
  
 -      const fragment = sessionName.replace(/^(?:codeman|claudeman)-/, '');
@@ -125,7 +137,7 @@ index 880dbf4..f85cbd7 100644
 +        name: displayName,
        };
        this.sessions.set(sessionId, session);
-       discovered.push(sessionId);
+       knownMuxNames.add(sessionName);
 diff --git a/test/superclaude-compat.test.ts b/test/superclaude-compat.test.ts
 new file mode 100644
 index 0000000..6ff5e4b
