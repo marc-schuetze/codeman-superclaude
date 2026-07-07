@@ -1,7 +1,7 @@
 From 6bb269de12472393cfd595b81e6a3c863567cbe1 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 21:14:13 +0200
-Subject: [PATCH 07/10] fix: shell-escape CODEMAN_MUX_NAME (sc| names contain a
+Subject: [PATCH 07/11] fix: shell-escape CODEMAN_MUX_NAME (sc| names contain a
  pipe)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

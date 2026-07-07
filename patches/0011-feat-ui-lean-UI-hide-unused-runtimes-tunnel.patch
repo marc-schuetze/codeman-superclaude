@@ -1,0 +1,72 @@
+From 46390d4f02be51a89852b85778cfa759a491439a Mon Sep 17 00:00:00 2001
+From: Marc <marc@schuetze.io>
+Date: Tue, 7 Jul 2026 22:20:50 +0200
+Subject: [PATCH 11/11] =?UTF-8?q?feat(ui):=20lean=20UI=20=E2=80=94=20hide?=
+ =?UTF-8?q?=20unused=20runtimes=20+=20tunnel?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This instance runs Claude + Shell only. There's no upstream config to hide
+the OpenCode/Codex/Gemini mode buttons or the Cloudflare Tunnel button
+(checked CLI flags, env vars, and the full settings schema — modes have no
+toggle), so hide them with an additive CSS block in styles.css:
+
+- welcome-screen OpenCode / Gemini / Tunnel launch buttons
+- run-mode dropdown options for opencode / codex / gemini
+- Codex CLI settings tab + panel
+- App Settings "Remote Access" (Cloudflare Tunnel) section incl. header, and
+  the experimental "Agent Teams" row
+
+Cosmetic only (backend still supports the modes if called); additive so it
+survives upstream bumps. Remove the block to restore the full UI.
+---
+ src/web/public/styles.css | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/src/web/public/styles.css b/src/web/public/styles.css
+index bf0d3cd..93b766a 100644
+--- a/src/web/public/styles.css
++++ b/src/web/public/styles.css
+@@ -11071,3 +11071,38 @@ html[data-skin="daylight-blue"] .welcome-btn-tunnel.active:hover {
+   background: linear-gradient(135deg, #7c3aed, #8b5cf6);
+   box-shadow: 0 0 28px -4px rgba(124, 58, 237, 0.5);
+ }
++
++/* ============================================================================
++   Lean UI — hide runtimes/features this instance doesn't use (Claude + Shell
++   only). Purely cosmetic: the backend still supports these modes if called
++   directly, and the App Settings toggles for teams/monitor/subagents/etc. are
++   already off — this only declutters the launcher + settings. There is no
++   upstream config for the mode buttons, so they're hidden here (additive, so
++   it survives upstream bumps). Remove this block to restore the full UI.
++   ============================================================================ */
++
++/* Welcome-screen launch buttons: drop OpenCode, Gemini, and Cloudflare Tunnel
++   (keep Claude). */
++.welcome-btn-opencode,
++.welcome-btn-gemini,
++.welcome-btn-tunnel,
++/* Run-mode dropdown options for the alternate CLIs. */
++.run-mode-option[data-mode="opencode"],
++.run-mode-option[data-mode="codex"],
++.run-mode-option[data-mode="gemini"],
++/* Codex CLI settings tab + its panel. */
++.modal-tab-btn[data-tab="settings-codex"],
++#settings-codex {
++  display: none !important;
++}
++
++/* App Settings: the whole "Remote Access" (Cloudflare Tunnel) section — its
++   header (selected via the tunnel toggle that immediately follows it) plus the
++   toggle and the URL rows. And the experimental "Agent Teams" row. */
++.settings-section-header:has(+ .settings-item #appSettingsTunnelEnabled),
++.settings-item:has(#appSettingsTunnelEnabled),
++#tunnelUrlRow,
++#tunnelUploadUrlRow,
++.form-row:has(#appSettingsAgentTeams) {
++  display: none !important;
++}
+-- 
+2.43.0
+

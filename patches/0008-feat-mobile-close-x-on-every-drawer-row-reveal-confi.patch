@@ -1,7 +1,7 @@
 From 333219752858cfc782d0cf4b9a51cb78cba5903a Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 21:27:39 +0200
-Subject: [PATCH 08/10] feat(mobile): close-[x] on every drawer row + reveal
+Subject: [PATCH 08/11] feat(mobile): close-[x] on every drawer row + reveal
  confirm modal
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

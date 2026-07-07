@@ -1,7 +1,7 @@
 From e4796108448a6dab9544bc43c0dd142a1d126ad9 Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Tue, 7 Jul 2026 21:41:35 +0200
-Subject: [PATCH 09/10] feat: periodic reconcile so external sessions
+Subject: [PATCH 09/11] feat: periodic reconcile so external sessions
  auto-appear
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

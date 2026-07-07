@@ -1,7 +1,7 @@
 From 09fb671488b9a6f4ca4bb74d73427ff624cb77ad Mon Sep 17 00:00:00 2001
 From: Marc <marc@schuetze.io>
 Date: Thu, 21 May 2026 06:59:07 +0200
-Subject: [PATCH 03/10] fix: wrap discovered tmux sessions in Session objects
+Subject: [PATCH 03/11] fix: wrap discovered tmux sessions in Session objects
  on reconcile
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
