@@ -126,4 +126,4 @@ flag for non-clobbering tmux config), this repo collapses to just the
 Docker + Traefik glue — `patches/` becomes empty.
 
 [codeman]: https://github.com/Ark0N/Codeman
-[superclaude]: https://github.com/scharc/superclaude
+[superclaude]: https://github.com/marc-schuetze/superclaude
